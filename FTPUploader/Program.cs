@@ -6,21 +6,49 @@ using System.Drawing.Imaging;
 using System.Threading;
 using System.Net;
 using System.Xml;
+using WinSCP;
 
 namespace FTPUploader
 {
     class Program
     {
+
         public static string ftpAddress;
         public static string localFolder;
         public static string ftpUsername;
         public static string ftpPassword;
 
+        public static string filePath = "C:\\Users\\jacks\\Desktop\\451274454-56aa3b305f9b58b7d002be61.jpg";
+
         static void Main(string[] args)
         {
+
+            // Set up session options
+            SessionOptions sessionOptions = new SessionOptions
+            {
+                Protocol = Protocol.Sftp,
+                HostName = "54.153.242.36",
+                UserName = "jackson",
+                SshHostKeyFingerprint = "ssh-ed25519 256 fyD+xDEkDlAWQtvCFKw1P0Go+ekp5hQwBwMzXrSZylo=",
+                SshPrivateKeyPath = @"C:\Users\jacks\Documents\AAAUni\jackson.ppk",
+            };
+
+            using (WinSCP.Session session = new WinSCP.Session())
+            {
+                // Connect
+                Console.WriteLine("Attemping open");
+                session.Open(sessionOptions);
+
+                // Your code
+                Console.WriteLine("Attemping upload");
+                var transferResult = session.PutFiles(@"C:\Users\jacks\Desktop\todo_11-5.txt", "/opt/bitnami/apache2/htdocs/", false);
+                transferResult.Check();
+                Console.WriteLine("done");
+            }
+
             try
             {
-                // Open xml settings file
+                //// Open xml settings file
                 XmlDocument XMLSettings = new XmlDocument();
                 XMLSettings.Load(Directory.GetCurrentDirectory() + @"\appSettings.txt");
 
@@ -47,9 +75,10 @@ namespace FTPUploader
             catch (Exception e)
             {
                 Console.WriteLine("Error opening setting file: " + e.ToString(), 0);
+                Console.ReadLine();
             }
 
-            // Monitors directory for changes
+            //// Monitors directory for changes
             FileSystemWatcher watcher = new FileSystemWatcher();
             watch();
             Console.ReadKey();
@@ -71,7 +100,7 @@ namespace FTPUploader
             // When file created call method
             void OnChanged(object source, FileSystemEventArgs e)
             {
-                ProcessFile(e.Name);    
+                ProcessFile(e.Name);
             }
         }
 
