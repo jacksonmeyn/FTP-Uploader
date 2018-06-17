@@ -6,6 +6,7 @@ using System.Drawing.Imaging;
 using System.Threading;
 using System.Net;
 using System.Xml;
+using System.Collections.Generic;
 using WinSCP;
 
 namespace FTPUploader
@@ -14,37 +15,15 @@ namespace FTPUploader
     {
 
         public static string ftpAddress;
-        public static string localFolder;
+        public static string localRootFolder;
         public static string ftpUsername;
-        public static string ftpPassword;
-
-        public static string filePath = "C:\\Users\\jacks\\Desktop\\451274454-56aa3b305f9b58b7d002be61.jpg";
+        public static string sshHostKeyFingerprint;
 
         static void Main(string[] args)
         {
 
-            // Set up session options
-            SessionOptions sessionOptions = new SessionOptions
-            {
-                Protocol = Protocol.Sftp,
-                HostName = "54.153.242.36",
-                UserName = "jackson",
-                SshHostKeyFingerprint = "ssh-ed25519 256 fyD+xDEkDlAWQtvCFKw1P0Go+ekp5hQwBwMzXrSZylo=",
-                SshPrivateKeyPath = @"C:\Users\jacks\Documents\AAAUni\jackson.ppk",
-            };
-
-            using (WinSCP.Session session = new WinSCP.Session())
-            {
-                // Connect
-                Console.WriteLine("Attemping open");
-                session.Open(sessionOptions);
-
-                // Your code
-                Console.WriteLine("Attemping upload");
-                var transferResult = session.PutFiles(@"C:\Users\jacks\Desktop\todo_11-5.txt", "/opt/bitnami/apache2/htdocs/", false);
-                transferResult.Check();
-                Console.WriteLine("done");
-            }
+            List<String> localSubdirectories = new List<string>();
+            List<FileSystemWatcher> fileSystemWatchers = new List<FileSystemWatcher>();
 
             try
             {
@@ -57,8 +36,8 @@ namespace FTPUploader
                 {
                     switch (node.Name)
                     {
-                        case "localFolder":
-                            localFolder = node.InnerText;
+                        case "localRootFolder":
+                            localRootFolder = node.InnerText;
                             break;
                         case "ftpAddress":
                             ftpAddress = node.InnerText;
@@ -66,11 +45,23 @@ namespace FTPUploader
                         case "ftpUsername":
                             ftpUsername = node.InnerText;
                             break;
-                        case "ftpPassword":
-                            ftpPassword = node.InnerText;
+                        case "sshHostKeyFingerprint":
+                            sshHostKeyFingerprint = node.InnerText;
+                            break;
+                        case "localSubfolders":
+                            XmlNode subfolders = node;
+                            Console.WriteLine(subfolders.Name);
+                            foreach (XmlNode subfolderNode in subfolders.ChildNodes)
+                            {
+                                Console.WriteLine(subfolderNode.InnerText);
+                                localSubdirectories.Add(localRootFolder);
+                                Console.WriteLine(localRootFolder + subfolderNode.InnerText);
+                            }
                             break;
                     }
                 }
+
+                localSubdirectories.ToArray();
             }
             catch (Exception e)
             {
@@ -79,7 +70,10 @@ namespace FTPUploader
             }
 
             //// Monitors directory for changes
-            FileSystemWatcher watcher = new FileSystemWatcher();
+            foreach (string filepath in localSubdirectories)
+            {
+                fileSystemWatchers.Add(new FileSystemWatcher(filepath));
+            }
             watch();
             Console.ReadKey();
 
@@ -87,14 +81,20 @@ namespace FTPUploader
             void watch()
             {
                 Console.WriteLine("*************************************");
-                Console.WriteLine("Monitoring folder for new images");
+                Console.WriteLine("Monitoring folder(s) for new files");
+                foreach (string fp in localSubdirectories)
+                {
+                    Console.WriteLine(fp);
+                }
                 Console.WriteLine("*************************************");
 
-                watcher.Path = localFolder;
-                // only watch for jpg files in directory
-                watcher.Filter = "*.jpg";
-                watcher.Created += new FileSystemEventHandler(OnChanged);
-                watcher.EnableRaisingEvents = true;
+                foreach (FileSystemWatcher f in fileSystemWatchers)
+                {
+                    f.Created += new FileSystemEventHandler(OnChanged);
+                    f.EnableRaisingEvents = true;
+                    f.IncludeSubdirectories = false;
+                }
+                
             }
 
             // When file created call method
@@ -109,8 +109,8 @@ namespace FTPUploader
         /////////////////////////////////////////////////
         public static void ProcessFile (string fileName)
         {
-            string ftpQueuePath = localFolder + @"FTPQueue\";
-            string originalFile = localFolder + fileName;
+            string ftpQueuePath = localRootFolder + @"FTPQueue\";
+            string originalFile = localRootFolder + fileName;
             string resizedFile = ftpQueuePath + fileName;
 
             // Check file extension
@@ -201,24 +201,47 @@ namespace FTPUploader
         /////////////////////////////////////////////////
         public static void FTPImageUpload(string currentFilename, string ftpQueuePath)
         {
+            
             Console.WriteLine("Connecting to FTP Server"); // Success
             try
             {
-                // Set FTP server credentials
-                WebClient client = new WebClient
+                using (Session session = new Session())
                 {
-                    Credentials = new NetworkCredential(ftpUsername, ftpPassword)
-                };
-                Console.WriteLine("Uploading..."); // Success
+                    // Set up session options
+                    SessionOptions sessionOptions = new SessionOptions
+                    {
+                        Protocol = Protocol.Sftp,
+                        HostName = ftpAddress,
+                        UserName = ftpUsername,
+                        SshHostKeyFingerprint = sshHostKeyFingerprint,
+                        SshPrivateKeyPath = Directory.GetCurrentDirectory() + @"\booth.ppk",
+                    };
 
-                // FTP upload using details in settings file
-                client.UploadFile(ftpAddress + currentFilename, ftpQueuePath + currentFilename);
-                Console.WriteLine("Finished"); // Success
+                    // Connect
+                    Console.WriteLine("Attempting open");
+                    session.Open(sessionOptions);
 
-                // Delete source file
-                Console.WriteLine("Deleting local file from queue"); // Success
-                File.Delete(ftpQueuePath + currentFilename); // Try to move
-                Console.WriteLine("Finished"); // Success
+                    // Your code
+                    Console.WriteLine("Attempting upload");
+                    var transferResult = session.PutFiles(ftpQueuePath + currentFilename, "/opt/bitnami/apache2/htdocs/", false);
+                    transferResult.Check();
+                    Console.WriteLine("done");
+                }
+                //// Set FTP server credentials
+                //WebClient client = new WebClient
+                //{
+                //    Credentials = new NetworkCredential(ftpUsername, ftpPassword)
+                //};
+                //Console.WriteLine("Uploading..."); // Success
+
+                //// FTP upload using details in settings file
+                //client.UploadFile(ftpAddress + currentFilename, ftpQueuePath + currentFilename);
+                //Console.WriteLine("Finished"); // Success
+
+                //// Delete source file
+                //Console.WriteLine("Deleting local file from queue"); // Success
+                //File.Delete(ftpQueuePath + currentFilename); // Try to move
+                //Console.WriteLine("Finished"); // Success
             }
             catch (IOException ex)
             {
