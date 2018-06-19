@@ -54,14 +54,13 @@ namespace FTPUploader
                             foreach (XmlNode subfolderNode in subfolders.ChildNodes)
                             {
                                 Console.WriteLine(subfolderNode.InnerText);
-                                localSubdirectories.Add(localRootFolder);
+                                localSubdirectories.Add(localRootFolder + subfolderNode.InnerText);
                                 Console.WriteLine(localRootFolder + subfolderNode.InnerText);
                             }
                             break;
                     }
                 }
 
-                localSubdirectories.ToArray();
             }
             catch (Exception e)
             {
@@ -100,42 +99,47 @@ namespace FTPUploader
             // When file created call method
             void OnChanged(object source, FileSystemEventArgs e)
             {
-                ProcessFile(e.Name);
+                Console.WriteLine(source.GetType());
+                ProcessFile(e.Name, (FileSystemWatcher)source);
             }
         }
 
         /////////////////////////////////////////////////
         // Method to process files created in directory
         /////////////////////////////////////////////////
-        public static void ProcessFile (string fileName)
+        public static void ProcessFile (string fileName, FileSystemWatcher fsw)
         {
+            string processedDirectory = fsw.Path + @"processed\";
+            Directory.CreateDirectory(processedDirectory);
+
             string ftpQueuePath = localRootFolder + @"FTPQueue\";
-            string originalFile = localRootFolder + fileName;
+            Directory.CreateDirectory(ftpQueuePath);
+
+            string originalFile = fsw.Path + fileName;
+            string movedOriginal = processedDirectory + fileName;
             string resizedFile = ftpQueuePath + fileName;
 
-            // Check file extension
-            string extension = Path.GetExtension(originalFile);
-
-            if (extension == ".jpg")
-            {
                 try
                 {
                     Thread.Sleep(1000); // wait 1 second to ensure the file has fully copied
                     Console.WriteLine("Opening New File: " + originalFile);
 
+                    //Move image to subdirectory
+                    File.Move(originalFile, movedOriginal);
+
                     // Open file stream
-                    Stream s = File.Open(originalFile, FileMode.Open);
+                    Stream s = File.Open(movedOriginal, FileMode.Open);
                     Image originalImageObject = Image.FromStream(s);
-                    Console.WriteLine("File Stream Opened: " + originalFile);
+                    Console.WriteLine("File Stream Opened: " + movedOriginal);
 
                     // Resize image to 1024 x 768 pixels
-                    Image resizedImageObject = ResizeImage(originalImageObject, new Size(1024, 768));
+                    Image resizedImageObject = ResizeImage(originalImageObject, new Size(1024, 720));
 
                     // Rename file to unique filename
-                    string newFilename = "BoothPhoto_" + DateTime.Now.Ticks + ".jpg";
+                    //string newFilename = "BoothPhoto_" + DateTime.Now.Ticks + ".jpg";
 
                     // Save to upload queue directory
-                    resizedImageObject.Save(ftpQueuePath + newFilename, ImageFormat.Jpeg);
+                    resizedImageObject.Save(ftpQueuePath + fileName, ImageFormat.Jpeg);
                     Console.WriteLine("Resized Photo Successfully");
 
                     // Dispose of objects before deleting old file
@@ -151,21 +155,16 @@ namespace FTPUploader
                     Console.WriteLine("Objects Set as Null");
 
                     // Delete full size original image
-                    File.Delete(originalFile);
-                    Console.WriteLine("Original File Deleted - " + originalFile);
+                    //File.Delete(originalFile);
+                    //Console.WriteLine("Original File Deleted - " + originalFile);
 
                     // Call ftp upload method
-                    FTPImageUpload(newFilename, ftpQueuePath);
+                    FTPImageUpload(fileName, ftpQueuePath);
                 }
                 catch (IOException ex)
                 {
                     Console.WriteLine(ex); // Write error
                 }
-            } else
-            {
-                File.Delete(originalFile); // delete invalid file
-                Console.WriteLine("Invalid File Deleted - " + originalFile); // Success
-            }
         }
 
         /////////////////////////////////////////////////
@@ -226,6 +225,9 @@ namespace FTPUploader
                     var transferResult = session.PutFiles(ftpQueuePath + currentFilename, "/opt/bitnami/apache2/htdocs/", false);
                     transferResult.Check();
                     Console.WriteLine("done");
+                    //// Delete source file
+                    Console.WriteLine("Deleting local file from queue"); // Success
+                    File.Delete(ftpQueuePath + currentFilename);
                 }
                 //// Set FTP server credentials
                 //WebClient client = new WebClient

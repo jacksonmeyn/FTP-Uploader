@@ -58,7 +58,9 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <Content Include="Credentials.xml" />
+    <Content Include="Credentials.xml">
+      <SubType>Designer</SubType>
+    </Content>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <Import Project="..\packages\WinSCP.5.13.2\build\WinSCP.targets" Condition="Exists('..\packages\WinSCP.5.13.2\build\WinSCP.targets')" />
