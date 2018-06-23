@@ -68,10 +68,26 @@ namespace FTPUploader
                 Console.ReadLine();
             }
 
+            //Process preexisting files
+            Console.WriteLine("Processing existing files...");
+
             //// Monitors directory for changes
             foreach (string filepath in localSubdirectories)
             {
-                fileSystemWatchers.Add(new FileSystemWatcher(filepath));
+                //Create FileSystemWatcher
+                FileSystemWatcher fsw = new FileSystemWatcher(filepath);
+           
+                //Process preexisting files
+                string[] existingFiles = Directory.GetFiles(filepath);
+                foreach (string file in existingFiles)
+                {
+                    Console.WriteLine("debug: " + Path.GetFileName(file));
+                    ProcessFile(Path.GetFileName(file), fsw);
+                }
+                Console.WriteLine("Processing existing files for {0} complete", filepath);
+
+                //Add watcher for new files
+                fileSystemWatchers.Add(fsw);
             }
             watch();
             Console.ReadKey();
@@ -92,6 +108,11 @@ namespace FTPUploader
                     f.Created += new FileSystemEventHandler(OnChanged);
                     f.EnableRaisingEvents = true;
                     f.IncludeSubdirectories = false;
+                    if (f.Path.Contains("GIF"))
+                    {
+                        f.Filter = "*.gif";
+                    }
+                    
                 }
                 
             }
@@ -99,7 +120,7 @@ namespace FTPUploader
             // When file created call method
             void OnChanged(object source, FileSystemEventArgs e)
             {
-                Console.WriteLine(source.GetType());
+                Console.WriteLine("debug: " + e.Name);
                 ProcessFile(e.Name, (FileSystemWatcher)source);
             }
         }
@@ -109,9 +130,11 @@ namespace FTPUploader
         /////////////////////////////////////////////////
         public static void ProcessFile (string fileName, FileSystemWatcher fsw)
         {
+            //Create 'processed' directory to move originals into
             string processedDirectory = fsw.Path + @"processed\";
             Directory.CreateDirectory(processedDirectory);
 
+            //Create FTP Queue folder to move resized originals into for uploadd
             string ftpQueuePath = localRootFolder + @"FTPQueue\";
             Directory.CreateDirectory(ftpQueuePath);
 
@@ -119,52 +142,92 @@ namespace FTPUploader
             string movedOriginal = processedDirectory + fileName;
             string resizedFile = ftpQueuePath + fileName;
 
-                try
+            if (".jpg.jpeg.gif".Contains(Path.GetExtension(originalFile)))
+            {
+                bool fileMoved = false;
+                while (!fileMoved)
                 {
-                    Thread.Sleep(1000); // wait 1 second to ensure the file has fully copied
-                    Console.WriteLine("Opening New File: " + originalFile);
+                    try
+                    {
+                        Thread.Sleep(1000); // wait 1 second to ensure the file has fully copied
 
-                    //Move image to subdirectory
-                    File.Move(originalFile, movedOriginal);
+                        //GIFs take longer for SocialBooth to create, so wait a little longer
+                        if (Path.GetExtension(originalFile) == ".gif")
+                        {
+                            Console.WriteLine("File is GIF, waiting longer");
+                            Thread.Sleep(6000);
+                        }
+                        
+                        Console.WriteLine("Opening New File: " + originalFile);
 
-                    // Open file stream
-                    Stream s = File.Open(movedOriginal, FileMode.Open);
-                    Image originalImageObject = Image.FromStream(s);
-                    Console.WriteLine("File Stream Opened: " + movedOriginal);
+                        //Move image to subdirectory
+                        Console.WriteLine("Attempting to move file...");
+                        File.Move(originalFile, movedOriginal);
+                        fileMoved = true;
 
-                    // Resize image to 1024 x 768 pixels
-                    Image resizedImageObject = ResizeImage(originalImageObject, new Size(1024, 720));
+                        // Open file stream
+                        Stream s = File.Open(movedOriginal, FileMode.Open);
+                        Image originalImageObject = Image.FromStream(s);
+                        Console.WriteLine("File Stream Opened: " + movedOriginal);
 
-                    // Rename file to unique filename
-                    //string newFilename = "BoothPhoto_" + DateTime.Now.Ticks + ".jpg";
+                        //Prepare to resize image
+                        Image resizedImageObject;
 
-                    // Save to upload queue directory
-                    resizedImageObject.Save(ftpQueuePath + fileName, ImageFormat.Jpeg);
-                    Console.WriteLine("Resized Photo Successfully");
+                        // If image is original photo, resize to 1024 x 768 pixels, otherwise don't resize
+                        if (fsw.Filter == "*.gif" || (originalImageObject.Width < 900 || originalImageObject.Width > 1100))
+                        {
+                            resizedImageObject = originalImageObject;
+                        }
+                        else
+                        {
+                            resizedImageObject = ResizeImage(originalImageObject, new Size(1024, 720));
+                        }
 
-                    // Dispose of objects before deleting old file
-                    resizedImageObject.Dispose();
-                    originalImageObject.Dispose();
-                    s.Close();
-                    Console.WriteLine("Objects Disposed");
 
-                    // Set objects as null for garbage collection
-                    originalImageObject = null;
-                    resizedImageObject = null;
-                    s = null;
-                    Console.WriteLine("Objects Set as Null");
+                        // Rename file to unique filename
+                        //string newFilename = "BoothPhoto_" + DateTime.Now.Ticks + ".jpg";
 
-                    // Delete full size original image
-                    //File.Delete(originalFile);
-                    //Console.WriteLine("Original File Deleted - " + originalFile);
+                        ImageFormat format;
+                        // Save to upload queue directory
+                        if (fsw.Filter != "*.gif")
+                        {
+                            format = ImageFormat.Jpeg;
+                        }
+                        else
+                        {
+                            format = ImageFormat.Gif;
+                        }
+                        resizedImageObject.Save(ftpQueuePath + fileName, format);
+                        Console.WriteLine("Resized Photo Successfully");
 
-                    // Call ftp upload method
-                    FTPImageUpload(fileName, ftpQueuePath);
+                        // Dispose of objects before deleting old file
+                        resizedImageObject.Dispose();
+                        originalImageObject.Dispose();
+                        s.Close();
+                        Console.WriteLine("Objects Disposed");
+
+                        // Set objects as null for garbage collection
+                        originalImageObject = null;
+                        resizedImageObject = null;
+                        s = null;
+                        Console.WriteLine("Objects Set as Null");
+
+                        // Delete full size original image
+                        //File.Delete(originalFile);
+                        //Console.WriteLine("Original File Deleted - " + originalFile);
+
+                        // Call ftp upload method
+                        FTPImageUpload(fileName, ftpQueuePath);
+                    }
+                    catch (IOException ex)
+                    {
+                        Console.WriteLine(ex); // Write error
+                    }
                 }
-                catch (IOException ex)
-                {
-                    Console.WriteLine(ex); // Write error
-                }
+                
+            }
+
+                
         }
 
         /////////////////////////////////////////////////
