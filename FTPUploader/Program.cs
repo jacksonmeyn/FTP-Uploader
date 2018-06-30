@@ -18,6 +18,8 @@ namespace FTPUploader
         public static string localRootFolder;
         public static string ftpUsername;
         public static string sshHostKeyFingerprint;
+        public static string serverPath;
+        public static string remoteDirectory;
 
         static void Main(string[] args)
         {
@@ -28,6 +30,7 @@ namespace FTPUploader
             string welcomeMessage = "Welcome to the SocialBooth FTP Uploader V1.0 designed for Little Red Photobooth";
             Console.WriteLine(welcomeMessage.ToUpper());
             Console.WriteLine("===========================================================================");
+            
 
             Console.WriteLine("Attempting to open settings file at {0}...", Directory.GetCurrentDirectory() + @"\appSettings.txt");
             try
@@ -60,14 +63,59 @@ namespace FTPUploader
                                 localSubdirectories.Add(localRootFolder + subfolderNode.InnerText);
                             }
                             break;
+                        case "ServerPath":
+                            serverPath = node.InnerText;
+                            break;
                     }
+
+                  
                 }
 
+                Console.WriteLine("Settings file opened successfully");
             }
             catch (Exception e)
             {
                 Console.WriteLine("Error opening setting file: " + e.ToString(), 0);
                 Console.ReadLine();
+            }
+
+            //Prompt user for event ID an check it exists on server
+            bool eventExists = false;
+            while (!eventExists)
+            {
+                Console.WriteLine("Please enter the ID number of the event you wish to upload this session's photos to");
+                try
+                {
+                    int eventID = Convert.ToInt32(Console.ReadLine());
+                    Session testSession = new Session();
+                    // Set up session options
+                    SessionOptions testSessionOptions = new SessionOptions
+                    {
+                        Protocol = Protocol.Sftp,
+                        HostName = ftpAddress,
+                        UserName = ftpUsername,
+                        SshHostKeyFingerprint = sshHostKeyFingerprint,
+                        SshPrivateKeyPath = Directory.GetCurrentDirectory() + @"\booth.ppk",
+                    };
+
+                    // Connect
+                    testSession.Open(testSessionOptions);
+
+                    // Your code
+                    remoteDirectory = serverPath + Convert.ToString(eventID);
+                    eventExists = testSession.FileExists(remoteDirectory);
+                    if (!eventExists)
+                    {
+                        Console.WriteLine("We can't seem to find that event on the server. Please check it exists and try again.");
+                    } else
+                    {
+                        Console.WriteLine("Thanks!");
+                    }
+                }
+                catch
+                {
+                    Console.WriteLine("The event ID must be a number. Try again.");
+                }
             }
 
             //Process preexisting files
@@ -275,7 +323,7 @@ namespace FTPUploader
 
                     // Your code
                     Console.Write("Attempting upload of {0}...", ftpQueuePath + currentFilename);
-                    var transferResult = session.PutFiles(ftpQueuePath + currentFilename, "/opt/bitnami/apache2/htdocs/", false);
+                    var transferResult = session.PutFiles(ftpQueuePath + currentFilename, remoteDirectory, false);
                     transferResult.Check();
                     Console.WriteLine("done");
                     //// Delete source file
