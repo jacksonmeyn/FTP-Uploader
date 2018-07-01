@@ -102,7 +102,7 @@ namespace FTPUploader
                     testSession.Open(testSessionOptions);
 
                     // Your code
-                    remoteDirectory = serverPath + Convert.ToString(eventID);
+                    remoteDirectory = serverPath + Convert.ToString(eventID) + "/";
                     eventExists = testSession.FileExists(remoteDirectory);
                     if (!eventExists)
                     {
@@ -185,16 +185,31 @@ namespace FTPUploader
             string processedDirectory = fsw.Path + @"processed\";
             Directory.CreateDirectory(processedDirectory);
 
-            //Create FTP Queue folder to move resized originals into for uploadd
-            string ftpQueuePath = localRootFolder + @"FTPQueue\";
-            Directory.CreateDirectory(ftpQueuePath);
-
-            string originalFile = fsw.Path + fileName;
-            string movedOriginal = processedDirectory + fileName;
-            string resizedFile = ftpQueuePath + fileName;
-
-            if (".jpg.jpeg.gif".Contains(Path.GetExtension(originalFile)))
+            if (fsw.Path.Contains("Customized"))
             {
+                //Crop to codes
+
+                //Create codes folder to moved cropped originals into for Google Vision
+                string ftpQueuePath = localRootFolder + @"ImageToText\";
+                Directory.CreateDirectory(ftpQueuePath);
+
+                string originalFile = fsw.Path + fileName;
+                string movedOriginal = processedDirectory + fileName;
+                string resizedFile = ftpQueuePath + fileName;
+            } else
+            {
+                //Resize and upload
+
+                //Create FTP Queue folder to move resized originals into for upload
+                string ftpQueuePath = localRootFolder + @"FTPQueue\";
+                Directory.CreateDirectory(ftpQueuePath);
+
+                string originalFile = fsw.Path + fileName;
+                string movedOriginal = processedDirectory + fileName;
+                string resizedFile = ftpQueuePath + fileName;
+
+                if (".jpg.gif".Contains(Path.GetExtension(originalFile)))
+                {
 
                     try
                     {
@@ -205,7 +220,7 @@ namespace FTPUploader
                         {
                             Thread.Sleep(6000);
                         }
-                        
+
                         Console.WriteLine("Opening File: " + originalFile);
 
                         //Move image to subdirectory
@@ -213,15 +228,15 @@ namespace FTPUploader
                         File.Move(originalFile, movedOriginal);
                         Console.WriteLine("completed");
 
-                    // Open file stream
-                    Console.WriteLine("Opening image {0}...", movedOriginal);
+                        // Open file stream
+                        Console.WriteLine("Opening image {0}...", movedOriginal);
                         Stream s = File.Open(movedOriginal, FileMode.Open);
                         Image originalImageObject = Image.FromStream(s);
                         Console.WriteLine("File Stream Opened: " + movedOriginal);
 
-                    //Prepare to resize image
-                    Console.WriteLine("Resizing image {0}...", movedOriginal);
-                    Image resizedImageObject;
+                        //Prepare to resize image
+                        Console.WriteLine("Resizing image {0}...", movedOriginal);
+                        Image resizedImageObject;
 
                         // If image is original photo, resize to 1024 x 768 pixels, otherwise don't resize
                         if (fsw.Filter == "*.gif" || (originalImageObject.Width < 900 || originalImageObject.Width > 1100))
@@ -263,8 +278,11 @@ namespace FTPUploader
                     {
                         Console.WriteLine(ex); // Write error
                     }
-                
+
+                }
             }
+
+            
 
                 
         }
