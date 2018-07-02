@@ -20,6 +20,7 @@ namespace FTPUploader
         public static string sshHostKeyFingerprint;
         public static string serverPath;
         public static string remoteDirectory;
+        public static List<string[]> codes;
 
         static void Main(string[] args)
         {
@@ -30,7 +31,9 @@ namespace FTPUploader
             string welcomeMessage = "Welcome to the SocialBooth FTP Uploader V1.0 designed for Little Red Photobooth";
             Console.WriteLine(welcomeMessage.ToUpper());
             Console.WriteLine("===========================================================================");
-            
+
+            codes = null;
+            UpdateUniqueCodes();
 
             Console.WriteLine("Attempting to open settings file at {0}...", Directory.GetCurrentDirectory() + @"\appSettings.txt");
             try
@@ -104,6 +107,7 @@ namespace FTPUploader
                     // Your code
                     remoteDirectory = serverPath + Convert.ToString(eventID) + "/";
                     eventExists = testSession.FileExists(remoteDirectory);
+                    testSession.Close();
                     if (!eventExists)
                     {
                         Console.WriteLine("We can't seem to find that event on the server. Please check it exists and try again.");
@@ -132,8 +136,12 @@ namespace FTPUploader
                 string[] existingFiles = Directory.GetFiles(filepath);
                 foreach (string file in existingFiles)
                 {
-                    Console.WriteLine("File {0} found", Path.GetFileName(file));
-                    ProcessFile(Path.GetFileName(file), fsw);
+                    if (!file.Contains(".jpeg"))
+                    {
+                        Console.WriteLine("File {0} found", Path.GetFileName(file));
+                        ProcessFile(Path.GetFileName(file), fsw);
+                    }
+
                 }
                 Console.WriteLine("Processing existing files in {0} complete", filepath);
                 Console.WriteLine("=====================================================");
@@ -141,6 +149,11 @@ namespace FTPUploader
                 //Add watcher for new files
                 fileSystemWatchers.Add(fsw);
             }
+
+            //Add fsw for data.txt file
+            FileSystemWatcher data = new FileSystemWatcher(@"C:\SocialBooth\Default\Data");
+            fileSystemWatchers.Add(data);
+
             watch();
             Console.ReadKey();
 
@@ -156,14 +169,26 @@ namespace FTPUploader
 
                 foreach (FileSystemWatcher f in fileSystemWatchers)
                 {
-                    f.Created += new FileSystemEventHandler(OnChanged);
+                    if (f.Path.Contains("Data"))
+                    {
+                        f.Changed += new FileSystemEventHandler(OnChanged);
+                    } else
+                    {
+                        f.Created += new FileSystemEventHandler(OnChanged);
+                    }
                     f.EnableRaisingEvents = true;
                     f.IncludeSubdirectories = false;
                     if (f.Path.Contains("GIF"))
                     {
                         f.Filter = "*.gif";
+                    } else if (f.Path.Contains("Data"))
+                    {
+                        f.Filter = "data.txt";
+                    } else
+                    {
+                        f.Filter = "*.jpg";
                     }
-                    
+
                 }
                 
             }
@@ -171,8 +196,16 @@ namespace FTPUploader
             // When file created call method
             void OnChanged(object source, FileSystemEventArgs e)
             {
-                Console.WriteLine("New image detected at {0}", e.FullPath);
-                ProcessFile(e.Name, (FileSystemWatcher)source);
+                FileSystemWatcher fsw = (FileSystemWatcher)source;
+                if (fsw.Path.Contains("Data")) {
+                    Console.Write("====================Data file change detected");
+                    UpdateUniqueCodes();
+                } else
+                {
+                    Console.WriteLine("New image detected at {0}", e.FullPath);
+                    ProcessFile(e.Name, (FileSystemWatcher)source);
+                }
+                
             }
         }
 
@@ -185,19 +218,6 @@ namespace FTPUploader
             string processedDirectory = fsw.Path + @"processed\";
             Directory.CreateDirectory(processedDirectory);
 
-            if (fsw.Path.Contains("Customized"))
-            {
-                //Crop to codes
-
-                //Create codes folder to moved cropped originals into for Google Vision
-                string ftpQueuePath = localRootFolder + @"ImageToText\";
-                Directory.CreateDirectory(ftpQueuePath);
-
-                string originalFile = fsw.Path + fileName;
-                string movedOriginal = processedDirectory + fileName;
-                string resizedFile = ftpQueuePath + fileName;
-            } else
-            {
                 //Resize and upload
 
                 //Create FTP Queue folder to move resized originals into for upload
@@ -271,8 +291,38 @@ namespace FTPUploader
                         resizedImageObject = null;
                         s = null;
 
-                        // Call ftp upload method
-                        FTPImageUpload(fileName, ftpQueuePath);
+
+                    //If a unique code corresponds with this filename, we can upload it and add reference to database
+                    bool codeFound = false;
+                    while (!codeFound)
+                    {
+                        Console.WriteLine("Code still not found");
+                        if (codes != null)
+                        {
+                            Thread.Sleep(5000);
+
+                            foreach (string[] code in codes)
+                            {
+
+                                if (fileName.Contains(code[0]))
+                                {
+                                    Console.WriteLine("{0} {1} {2}", fileName, code[0], code[1]);
+                                    // Call ftp upload method
+                                    //FTPImageUpload(fileName, ftpQueuePath);
+                                    codeFound = true;
+                                    break;
+
+                                    //Insert into database
+
+                                }
+                            }
+                        }
+                        
+                    }
+
+                    
+
+                        
                     }
                     catch (IOException ex)
                     {
@@ -280,7 +330,6 @@ namespace FTPUploader
                     }
 
                 }
-            }
 
             
 
@@ -288,9 +337,39 @@ namespace FTPUploader
         }
 
         /////////////////////////////////////////////////
-        // Method to resize the image for faster uploads
+        // Method to process files created in directory
         /////////////////////////////////////////////////
-        public static Image ResizeImage(Image image, Size size)
+        public static void UpdateUniqueCodes()
+        {
+            //Check data file for filename and associate with unique code
+
+            codes = new List<string[]>();
+            try
+            {
+                string filePath = @"C:\SocialBooth\Default\Data\data.txt";
+                StreamReader sr = new StreamReader(filePath);
+
+                while (!sr.EndOfStream)
+                {
+                    string[] Line = sr.ReadLine().Split(',');
+                    string file = Line[22].Replace("\"", String.Empty);
+                    file = Path.GetFileNameWithoutExtension(file);
+                    string code = Line[23].Replace("\"", String.Empty);
+                    codes.Add(new string[] { file, code });
+                }
+
+                sr.Close();
+            }
+            catch
+            {
+
+            }
+        }
+
+/////////////////////////////////////////////////
+// Method to resize the image for faster uploads
+/////////////////////////////////////////////////
+public static Image ResizeImage(Image image, Size size)
         {
             int newWidth;
             int newHeight;
@@ -318,7 +397,7 @@ namespace FTPUploader
         /////////////////////////////////////////////////
         // Mehtod to upload file to FTP server
         /////////////////////////////////////////////////
-        public static void FTPImageUpload(string currentFilename, string ftpQueuePath)
+        public static bool FTPImageUpload(string currentFilename, string ftpQueuePath)
         {
             
             Console.WriteLine("Connecting to FTP Server..."); // Success
@@ -343,16 +422,19 @@ namespace FTPUploader
                     Console.Write("Attempting upload of {0}...", ftpQueuePath + currentFilename);
                     var transferResult = session.PutFiles(ftpQueuePath + currentFilename, remoteDirectory, false);
                     transferResult.Check();
+                    session.Close();
                     Console.WriteLine("done");
                     //// Delete source file
                     Console.Write("Deleting {0} from queue...", currentFilename); // Success
                     File.Delete(ftpQueuePath + currentFilename);
                     Console.WriteLine("done");
+                    return true;
                 }
             }
             catch (IOException ex)
             {
                 Console.WriteLine(ex); // Write error
+                return false;
             }
         }
     }
