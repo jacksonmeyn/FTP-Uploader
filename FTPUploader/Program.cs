@@ -8,6 +8,8 @@ using System.Net;
 using System.Xml;
 using System.Collections.Generic;
 using WinSCP;
+using MySql.Data;
+using MySql.Data.MySqlClient;
 
 namespace FTPUploader
 {
@@ -20,7 +22,9 @@ namespace FTPUploader
         public static string sshHostKeyFingerprint;
         public static string serverPath;
         public static string remoteDirectory;
+        public static string connStr;
         public static List<string[]> codes;
+        public static int eventID;
 
         static void Main(string[] args)
         {
@@ -32,8 +36,7 @@ namespace FTPUploader
             Console.WriteLine(welcomeMessage.ToUpper());
             Console.WriteLine("===========================================================================");
 
-            codes = null;
-            UpdateUniqueCodes();
+            
 
             Console.WriteLine("Attempting to open settings file at {0}...", Directory.GetCurrentDirectory() + @"\appSettings.txt");
             try
@@ -66,8 +69,11 @@ namespace FTPUploader
                                 localSubdirectories.Add(localRootFolder + subfolderNode.InnerText);
                             }
                             break;
-                        case "ServerPath":
+                        case "serverPath":
                             serverPath = node.InnerText;
+                            break;
+                        case "connectionString":
+                            connStr = node.InnerText;
                             break;
                     }
 
@@ -82,6 +88,8 @@ namespace FTPUploader
                 Console.ReadLine();
             }
 
+            
+
             //Prompt user for event ID an check it exists on server
             bool eventExists = false;
             while (!eventExists)
@@ -89,7 +97,8 @@ namespace FTPUploader
                 Console.WriteLine("Please enter the ID number of the event you wish to upload this session's photos to");
                 try
                 {
-                    int eventID = Convert.ToInt32(Console.ReadLine());
+                    eventID = Convert.ToInt32(Console.ReadLine());
+                    Console.WriteLine("Checking event ID " + Convert.ToString(eventID) + " exists on the server...");
                     Session testSession = new Session();
                     // Set up session options
                     SessionOptions testSessionOptions = new SessionOptions
@@ -113,7 +122,7 @@ namespace FTPUploader
                         Console.WriteLine("We can't seem to find that event on the server. Please check it exists and try again.");
                     } else
                     {
-                        Console.WriteLine("Thanks!");
+                        Console.WriteLine("Event found successfully!");
                     }
                 }
                 catch
@@ -121,6 +130,9 @@ namespace FTPUploader
                     Console.WriteLine("The event ID must be a number. Try again.");
                 }
             }
+
+            codes = null;
+            UpdateUniqueCodes();
 
             //Process preexisting files
             Console.WriteLine("Checking for existing files...");
@@ -218,8 +230,6 @@ namespace FTPUploader
             string processedDirectory = fsw.Path + @"processed\";
             Directory.CreateDirectory(processedDirectory);
 
-                //Resize and upload
-
                 //Create FTP Queue folder to move resized originals into for upload
                 string ftpQueuePath = localRootFolder + @"FTPQueue\";
                 Directory.CreateDirectory(ftpQueuePath);
@@ -281,7 +291,7 @@ namespace FTPUploader
                         resizedImageObject.Save(ftpQueuePath + fileName, format);
                         Console.WriteLine("Resized Image {0} and moved to {1} successfully", fileName, ftpQueuePath + fileName);
 
-                        // Dispose of objects before deleting old file
+                        // Dispose of objects
                         resizedImageObject.Dispose();
                         originalImageObject.Dispose();
                         s.Close();
@@ -292,33 +302,7 @@ namespace FTPUploader
                         s = null;
 
 
-                    //If a unique code corresponds with this filename, we can upload it and add reference to database
-                    bool codeFound = false;
-                    while (!codeFound)
-                    {
-                        Console.WriteLine("Code still not found");
-                        if (codes != null)
-                        {
-                            Thread.Sleep(5000);
-
-                            foreach (string[] code in codes)
-                            {
-
-                                if (fileName.Contains(code[0]))
-                                {
-                                    Console.WriteLine("{0} {1} {2}", fileName, code[0], code[1]);
-                                    // Call ftp upload method
-                                    //FTPImageUpload(fileName, ftpQueuePath);
-                                    codeFound = true;
-                                    break;
-
-                                    //Insert into database
-
-                                }
-                            }
-                        }
-                        
-                    }
+                    
 
                     
 
@@ -362,6 +346,69 @@ namespace FTPUploader
             }
             catch
             {
+
+            }
+
+            //Go through each file in FTPQueue folder and check if a code exists for it, if yes, upload it
+            string ftpQueuePath = localRootFolder + @"FTPQueue\";
+            string[] queuedFiles = Directory.GetFiles(ftpQueuePath);
+            foreach (string file in queuedFiles)
+            {
+                string matchingCode = "";
+                bool uploadSuccess = false;
+
+                foreach (string[] code in codes)
+                {
+
+                    if (file.Contains(code[0]))
+                    {
+                        Console.WriteLine("{0} matched with {1} and code {2}", file, code[0], code[1]);
+
+                        matchingCode = code[1];
+                        break;
+
+                    }
+                }
+
+                if (matchingCode != "")
+                {
+                    // Call ftp upload method
+                    if (FTPImageUpload(file, ftpQueuePath) == true)
+                    {
+                        //addToDatabase();
+                        Console.WriteLine("Update database");
+
+                        MySqlConnection conn = new MySqlConnection(connStr);
+                        try
+                        {
+                            Console.WriteLine("Connecting to MySQL...");
+                            Console.WriteLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                            conn.Open();
+
+                            string sql = "INSERT INTO photos (EventID, Filename, ImageType, Timestamp, UniqueCode) VALUES (@eventID,@filename, @imageType, @timestamp, @uniqueCode)";
+                            MySqlCommand cmd = new MySqlCommand(sql, conn);
+
+                            cmd.Parameters.AddWithValue("@eventID", eventID);
+                            cmd.Parameters.AddWithValue("@filename", Path.GetFileName(file));
+                            cmd.Parameters.AddWithValue("@imageType", 1);
+                            cmd.Parameters.AddWithValue("@timestamp", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                            cmd.Parameters.AddWithValue("@uniqueCode", matchingCode);
+                            //cmd.Parameters["@eventID"].Value = eventID;
+                            //cmd.Parameters["@filename"].Value = ;
+                            //cmd.Parameters["@imageType"].Value = 1;
+                            Console.WriteLine(cmd.Parameters["@timestamp"].Value);
+                            //cmd.Parameters["@uniqueCode"].Value = matchingCode;
+                            cmd.ExecuteNonQuery();
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine(ex.ToString());
+                        }
+
+                        conn.Close();
+                        Console.WriteLine("Done.");
+                    }
+                }
 
             }
         }
@@ -419,16 +466,15 @@ public static Image ResizeImage(Image image, Size size)
                     session.Open(sessionOptions);
 
                     // Your code
-                    Console.Write("Attempting upload of {0}...", ftpQueuePath + currentFilename);
-                    var transferResult = session.PutFiles(ftpQueuePath + currentFilename, remoteDirectory, false);
-                    transferResult.Check();
+                    Console.Write("Attempting upload of {0}...", ftpQueuePath + Path.GetFileName(currentFilename));
+                    var transferResult = session.PutFiles(ftpQueuePath + Path.GetFileName(currentFilename), remoteDirectory, false);
                     session.Close();
                     Console.WriteLine("done");
                     //// Delete source file
                     Console.Write("Deleting {0} from queue...", currentFilename); // Success
-                    File.Delete(ftpQueuePath + currentFilename);
+                    File.Delete(ftpQueuePath + Path.GetFileName(currentFilename));
                     Console.WriteLine("done");
-                    return true;
+                    return transferResult.IsSuccess;
                 }
             }
             catch (IOException ex)
