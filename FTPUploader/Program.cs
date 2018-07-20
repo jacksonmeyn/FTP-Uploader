@@ -88,47 +88,56 @@ namespace FTPUploader
                 Console.ReadLine();
             }
 
-            
+
 
             //Prompt user for event ID an check it exists on server
+            bool validInt = false;
             bool eventExists = false;
             while (!eventExists)
             {
-                Console.WriteLine("Please enter the ID number of the event you wish to upload this session's photos to");
-                try
+                while (!validInt)
                 {
-                    eventID = Convert.ToInt32(Console.ReadLine());
-                    Console.WriteLine("Checking event ID " + Convert.ToString(eventID) + " exists on the server...");
-                    Session testSession = new Session();
-                    // Set up session options
-                    SessionOptions testSessionOptions = new SessionOptions
+                    Console.WriteLine("Please enter the ID number of the event you wish to upload this session's photos to");
+                    try
                     {
-                        Protocol = Protocol.Sftp,
-                        HostName = ftpAddress,
-                        UserName = ftpUsername,
-                        SshHostKeyFingerprint = sshHostKeyFingerprint,
-                        SshPrivateKeyPath = Directory.GetCurrentDirectory() + @"\booth.ppk",
-                    };
-
-                    // Connect
-                    testSession.Open(testSessionOptions);
-
-                    // Your code
-                    remoteDirectory = serverPath + Convert.ToString(eventID) + "/";
-                    eventExists = testSession.FileExists(remoteDirectory);
-                    testSession.Close();
-                    if (!eventExists)
+                        eventID = Convert.ToInt32(Console.ReadLine());
+                        validInt = true;
+                    }
+                    catch
                     {
-                        Console.WriteLine("We can't seem to find that event on the server. Please check it exists and try again.");
-                    } else
-                    {
-                        Console.WriteLine("Event found successfully!");
+                        Console.WriteLine("The event ID must be a number. Try again.");
                     }
                 }
-                catch
+                
+
+                Console.WriteLine("Checking event ID " + Convert.ToString(eventID) + " exists on the server...");
+                Session testSession = new Session();
+                // Set up session options
+                SessionOptions testSessionOptions = new SessionOptions
                 {
-                    Console.WriteLine("The event ID must be a number. Try again.");
+                    Protocol = Protocol.Sftp,
+                    HostName = ftpAddress,
+                    UserName = ftpUsername,
+                    SshHostKeyFingerprint = sshHostKeyFingerprint,
+                    SshPrivateKeyPath = Directory.GetCurrentDirectory() + @"\booth.ppk",
+                };
+
+                // Connect
+                testSession.Open(testSessionOptions);
+
+                // Your code
+                remoteDirectory = serverPath + Convert.ToString(eventID) + "/";
+                eventExists = testSession.FileExists(remoteDirectory);
+                testSession.Close();
+                if (!eventExists)
+                {
+                    Console.WriteLine("We can't seem to find that event on the server. Please check it exists and try again.");
                 }
+                else
+                {
+                    Console.WriteLine("Event found successfully!");
+                }
+
             }
 
             codes = null;
