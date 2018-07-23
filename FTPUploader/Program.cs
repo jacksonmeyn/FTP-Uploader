@@ -16,6 +16,7 @@ namespace FTPUploader
     class Program
     {
 
+        //Inputs read from appSettings.txt
         public static string ftpAddress;
         public static string localRootFolder;
         public static string ftpUsername;
@@ -23,8 +24,13 @@ namespace FTPUploader
         public static string serverPath;
         public static string remoteDirectory;
         public static string connStr;
+
         public static List<string[]> codes;
+
+        //User inputs
         public static int eventID;
+        public static bool isPrivateEvent;
+
 
         static void Main(string[] args)
         {
@@ -36,56 +42,55 @@ namespace FTPUploader
             Console.WriteLine(welcomeMessage.ToUpper());
             Console.WriteLine("===========================================================================");
 
-            
 
+            XmlDocument XMLSettings = new XmlDocument();
             Console.WriteLine("Attempting to open settings file at {0}...", Directory.GetCurrentDirectory() + @"\appSettings.txt");
             try
             {
                 //// Open xml settings file
-                XmlDocument XMLSettings = new XmlDocument();
+                
                 XMLSettings.Load(Directory.GetCurrentDirectory() + @"\appSettings.txt");
-
-                // cycle through each child node in settings file to get values
-                foreach (XmlNode node in XMLSettings.DocumentElement.ChildNodes)
-                {
-                    switch (node.Name)
-                    {
-                        case "localRootFolder":
-                            localRootFolder = node.InnerText;
-                            break;
-                        case "ftpAddress":
-                            ftpAddress = node.InnerText;
-                            break;
-                        case "ftpUsername":
-                            ftpUsername = node.InnerText;
-                            break;
-                        case "sshHostKeyFingerprint":
-                            sshHostKeyFingerprint = node.InnerText;
-                            break;
-                        case "localSubfolders":
-                            XmlNode subfolders = node;
-                            foreach (XmlNode subfolderNode in subfolders.ChildNodes)
-                            {
-                                localSubdirectories.Add(localRootFolder + subfolderNode.InnerText);
-                            }
-                            break;
-                        case "serverPath":
-                            serverPath = node.InnerText;
-                            break;
-                        case "connectionString":
-                            connStr = node.InnerText;
-                            break;
-                    }
-
-                  
-                }
-
                 Console.WriteLine("Settings file opened successfully");
             }
             catch (Exception e)
             {
                 Console.WriteLine("Error opening setting file: " + e.ToString(), 0);
                 Console.ReadLine();
+            }
+
+            // cycle through each child node in settings file to get values
+            foreach (XmlNode node in XMLSettings.DocumentElement.ChildNodes)
+            {
+                switch (node.Name)
+                {
+                    case "localRootFolder":
+                        localRootFolder = node.InnerText;
+                        break;
+                    case "ftpAddress":
+                        ftpAddress = node.InnerText;
+                        break;
+                    case "ftpUsername":
+                        ftpUsername = node.InnerText;
+                        break;
+                    case "sshHostKeyFingerprint":
+                        sshHostKeyFingerprint = node.InnerText;
+                        break;
+                    case "localSubfolders":
+                        XmlNode subfolders = node;
+                        foreach (XmlNode subfolderNode in subfolders.ChildNodes)
+                        {
+                            localSubdirectories.Add(localRootFolder + subfolderNode.InnerText);
+                        }
+                        break;
+                    case "serverPath":
+                        serverPath = node.InnerText;
+                        break;
+                    case "connectionString":
+                        connStr = node.InnerText;
+                        break;
+                }
+
+
             }
 
 
@@ -140,6 +145,29 @@ namespace FTPUploader
 
             }
 
+            //Prompt user for if unique codes will be printed on images
+            Console.WriteLine("Will the photobooth print unique codes on each strip at this event? Enter y or n.");
+            Console.WriteLine("WARNING: If y is selected, photos will not be uploaded unless a unique code is detected, and guests will only be able to see the photos online for which they have a unique code.");
+            bool validResponse = false;
+            while (!validResponse)
+            {
+                string response = Console.ReadLine();
+                if (response.ToLower() == "y")
+                {
+                    isPrivateEvent = true;
+                    validResponse = true;
+                    continue;
+                }
+                if (response.ToLower() == "n")
+                {
+                    isPrivateEvent = false;
+                    validResponse = true;
+                    continue;
+                }
+                Console.WriteLine("Response was invalid. Please only enter y or n");
+            }
+
+            //Instantiate new list of unique codes and populate
             codes = null;
             UpdateUniqueCodes();
 
@@ -310,6 +338,8 @@ namespace FTPUploader
                         resizedImageObject = null;
                         s = null;
 
+                    ProcessUploadQueue();
+
 
                     
 
@@ -330,12 +360,11 @@ namespace FTPUploader
         }
 
         /////////////////////////////////////////////////
-        // Method to process files created in directory
+        // Method to update the list of codes from the data.txt file
         /////////////////////////////////////////////////
         public static void UpdateUniqueCodes()
         {
-            //Check data file for filename and associate with unique code
-
+            //Update the list of codes from the data.txt file
             codes = new List<string[]>();
             try
             {
@@ -358,68 +387,6 @@ namespace FTPUploader
 
             }
 
-            //Go through each file in FTPQueue folder and check if a code exists for it, if yes, upload it
-            string ftpQueuePath = localRootFolder + @"FTPQueue\";
-            string[] queuedFiles = Directory.GetFiles(ftpQueuePath);
-            foreach (string file in queuedFiles)
-            {
-                string matchingCode = "";
-                bool uploadSuccess = false;
-
-                foreach (string[] code in codes)
-                {
-
-                    if (file.Contains(code[0]))
-                    {
-                        Console.WriteLine("{0} matched with {1} and code {2}", file, code[0], code[1]);
-
-                        matchingCode = code[1];
-                        break;
-
-                    }
-                }
-
-                if (matchingCode != "")
-                {
-                    // Call ftp upload method
-                    if (FTPImageUpload(file, ftpQueuePath) == true)
-                    {
-                        //addToDatabase();
-                        Console.WriteLine("Update database");
-
-                        MySqlConnection conn = new MySqlConnection(connStr);
-                        try
-                        {
-                            Console.WriteLine("Connecting to MySQL...");
-                            Console.WriteLine(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-                            conn.Open();
-
-                            string sql = "INSERT INTO photos (EventID, Filename, ImageType, Timestamp, UniqueCode) VALUES (@eventID,@filename, @imageType, @timestamp, @uniqueCode)";
-                            MySqlCommand cmd = new MySqlCommand(sql, conn);
-
-                            cmd.Parameters.AddWithValue("@eventID", eventID);
-                            cmd.Parameters.AddWithValue("@filename", Path.GetFileName(file));
-                            cmd.Parameters.AddWithValue("@imageType", 1);
-                            cmd.Parameters.AddWithValue("@timestamp", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-                            cmd.Parameters.AddWithValue("@uniqueCode", matchingCode);
-                            //cmd.Parameters["@eventID"].Value = eventID;
-                            //cmd.Parameters["@filename"].Value = ;
-                            //cmd.Parameters["@imageType"].Value = 1;
-                            Console.WriteLine(cmd.Parameters["@timestamp"].Value);
-                            //cmd.Parameters["@uniqueCode"].Value = matchingCode;
-                            cmd.ExecuteNonQuery();
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine(ex.ToString());
-                        }
-
-                        conn.Close();
-                        Console.WriteLine("Done.");
-                    }
-                }
-
-            }
         }
 
 /////////////////////////////////////////////////
@@ -490,6 +457,70 @@ public static Image ResizeImage(Image image, Size size)
             {
                 Console.WriteLine(ex); // Write error
                 return false;
+            }
+        }
+
+        public static void ProcessUploadQueue()
+        {
+            //Go through each file in FTPQueue folder and upload it if the event's unique code conditions are met
+            string ftpQueuePath = localRootFolder + @"FTPQueue\";
+            string[] queuedFiles = Directory.GetFiles(ftpQueuePath);
+            foreach (string file in queuedFiles)
+            {
+                string matchingCode = "";
+
+                //If event is private, try to find matching code for the image about to be uploaded
+                if (isPrivateEvent)
+                {
+                    foreach (string[] code in codes)
+                    {
+
+                        if (file.Contains(code[0]))
+                        {
+                            Console.WriteLine("{0} matched with {1} and code {2}", file, code[0], code[1]);
+
+                            matchingCode = code[1];
+                            break;
+
+                        }
+                    }
+                }
+
+                //If the event is private, the there must be a code associated with the photo before upload
+                //otherwise, the photo can be uploaded regardless
+                if ((isPrivateEvent && matchingCode != "") || !isPrivateEvent)
+                {
+                    // Call ftp upload method
+                    if (FTPImageUpload(file, ftpQueuePath) == true)
+                    {
+                        //addToDatabase();
+                        Console.WriteLine("Updating database...");
+
+                        MySqlConnection conn = new MySqlConnection(connStr);
+                        try
+                        {
+                            conn.Open();
+
+                            string sql = "INSERT INTO photos (EventID, Filename, IsUserUpload, Timestamp, UniqueCode) VALUES (@eventID,@filename, @isUserUpload, @timestamp, @uniqueCode)";
+                            MySqlCommand cmd = new MySqlCommand(sql, conn);
+
+                            cmd.Parameters.AddWithValue("@eventID", eventID);
+                            cmd.Parameters.AddWithValue("@filename", Path.GetFileName(file));
+                            cmd.Parameters.AddWithValue("@isUserUpload", 0);
+                            cmd.Parameters.AddWithValue("@timestamp", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+                            cmd.Parameters.AddWithValue("@uniqueCode", matchingCode);
+                            cmd.ExecuteNonQuery();
+                            Console.WriteLine("File {0} successfully added to database", file);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine(ex.ToString());
+                        } finally
+                        {
+                            conn.Close();
+                        }
+                    }
+                }
             }
         }
     }
