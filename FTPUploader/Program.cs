@@ -127,13 +127,22 @@ namespace FTPUploader
                     SshPrivateKeyPath = Directory.GetCurrentDirectory() + @"\booth.ppk",
                 };
 
-                // Connect
-                testSession.Open(testSessionOptions);
+                try
+                {
+                    // Connect
+                    testSession.Open(testSessionOptions);
 
-                // Your code
-                remoteDirectory = serverPath + Convert.ToString(eventID) + "/";
-                eventExists = testSession.FileExists(remoteDirectory);
-                testSession.Close();
+                    // Your code
+                    remoteDirectory = serverPath + Convert.ToString(eventID) + "/";
+                    eventExists = testSession.FileExists(remoteDirectory);
+                    testSession.Close();
+                } catch (Exception e)
+                {
+                    Console.WriteLine("There was a problem connecting to the server. Please check the internet connection and that the app settings are correct");
+                    Exit();
+                }
+
+                
                 if (!eventExists)
                 {
                     Console.WriteLine("We can't seem to find that event on the server. Please check it exists and try again.");
@@ -167,9 +176,14 @@ namespace FTPUploader
                 Console.WriteLine("Response was invalid. Please only enter y or n");
             }
 
-            //Instantiate new list of unique codes and populate
-            codes = null;
-            UpdateUniqueCodes();
+            //If event is private
+            if (isPrivateEvent)
+            {
+                //Instantiate new list of unique codes and populate
+                codes = null;
+                UpdateUniqueCodes();
+            }
+            
 
             //Process preexisting files
             Console.WriteLine("Checking for existing files...");
@@ -522,6 +536,13 @@ public static Image ResizeImage(Image image, Size size)
                     }
                 }
             }
+        }
+
+        public static void Exit()
+        {
+            Console.WriteLine("Press any key to exit.");
+            Console.ReadKey();
+            Environment.Exit(0);
         }
     }
 }
