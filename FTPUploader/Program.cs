@@ -19,6 +19,8 @@ namespace FTPUploader
         //Inputs read from appSettings.txt
         public static string ftpAddress;
         public static string localRootFolder;
+        public static string dataFilePath;
+
         public static string ftpUsername;
         public static string sshHostKeyFingerprint;
         public static string serverPath;
@@ -65,6 +67,13 @@ namespace FTPUploader
                 {
                     case "localRootFolder":
                         localRootFolder = node.InnerText;
+
+                        //Add trailing slash if not already included
+                        char trailingSlash = "\\";
+                        if (localRootFolder[localRootFolder.Length - 1] != trailingSlash)
+                        {
+                            localRootFolder += @"\";
+                        }
                         break;
                     case "ftpAddress":
                         ftpAddress = node.InnerText;
@@ -81,6 +90,9 @@ namespace FTPUploader
                         {
                             localSubdirectories.Add(localRootFolder + subfolderNode.InnerText);
                         }
+                        break;
+                    case "dataFile":
+                        dataFilePath = localRootFolder + node.InnerText;
                         break;
                     case "serverPath":
                         serverPath = node.InnerText;
@@ -131,15 +143,21 @@ namespace FTPUploader
                 {
                     // Connect
                     testSession.Open(testSessionOptions);
+                } catch (Exception e)
+                {
+                    Console.WriteLine("There was a problem connecting to the server. Please check the internet connection.");
+                    Exit();
+                }
 
+                try
+                {
                     // Your code
                     remoteDirectory = serverPath + Convert.ToString(eventID) + "/";
                     eventExists = testSession.FileExists(remoteDirectory);
                     testSession.Close();
                 } catch (Exception e)
                 {
-                    Console.WriteLine("There was a problem connecting to the server. Please check the internet connection and that the app settings are correct");
-                    Exit();
+                    Console.WriteLine("There was a problem checking the event exists. Please check appSettings.txt is correct.");
                 }
 
                 
@@ -179,6 +197,19 @@ namespace FTPUploader
             //If event is private
             if (isPrivateEvent)
             {
+
+                while (!File.Exists(dataFilePath))
+                {
+                    Console.WriteLine("We couldn't find the specified data file that contains the unique codes (" + dataFilePath + ").");
+                    Console.WriteLine("Don't worry, this can happen if an event has no photos yet, so we'll keep trying.");
+                    Thread.Sleep(5000);
+                }
+
+                Console.WriteLine("Data file for unique codes found.");
+
+                FileSystemWatcher data = new FileSystemWatcher(Path.GetDirectoryName(dataFilePath));
+                fileSystemWatchers.Add(data);
+
                 //Instantiate new list of unique codes and populate
                 codes = null;
                 UpdateUniqueCodes();
@@ -191,31 +222,38 @@ namespace FTPUploader
             //// Monitors directory for changes
             foreach (string filepath in localSubdirectories)
             {
-                Console.WriteLine("Checking for existing files in {0}...", filepath);
+                
                 //Create FileSystemWatcher
-                FileSystemWatcher fsw = new FileSystemWatcher(filepath);
-           
-                //Process preexisting files
-                string[] existingFiles = Directory.GetFiles(filepath);
-                foreach (string file in existingFiles)
+                try
                 {
-                    if (!file.Contains(".jpeg"))
+                    FileSystemWatcher fsw = new FileSystemWatcher(filepath);
+                    Console.WriteLine("Checking for existing files in {0}...", fsw.Path);
+                    //Process preexisting files
+                    string[] existingFiles = Directory.GetFiles(fsw.Path);
+                    foreach (string file in existingFiles)
                     {
-                        Console.WriteLine("File {0} found", Path.GetFileName(file));
-                        ProcessFile(Path.GetFileName(file), fsw);
+                        if (!file.Contains(".jpeg"))
+                        {
+                            Console.WriteLine("File {0} found", Path.GetFileName(file));
+                            ProcessFile(Path.GetFileName(file), fsw);
+                        }
+
                     }
+                    Console.WriteLine("Processing existing files in {0} complete", fsw.Path);
+                    Console.WriteLine("=====================================================");
 
+                    //Add watcher for new files
+                    fileSystemWatchers.Add(fsw);
+                } catch (ArgumentException ae)
+                {
+                    Console.WriteLine(filepath + " doesn't exist. Check appSettings.txt is correct and restart the program");
+                    Exit();
                 }
-                Console.WriteLine("Processing existing files in {0} complete", filepath);
-                Console.WriteLine("=====================================================");
 
-                //Add watcher for new files
-                fileSystemWatchers.Add(fsw);
+                
             }
 
-            //Add fsw for data.txt file
-            FileSystemWatcher data = new FileSystemWatcher(@"C:\SocialBooth\Default\Data");
-            fileSystemWatchers.Add(data);
+            
 
             watch();
             Console.ReadKey();
@@ -438,10 +476,11 @@ public static Image ResizeImage(Image image, Size size)
         {
             
             Console.WriteLine("Connecting to FTP Server..."); // Success
+            Session session = new Session();
+            bool result = false;
             try
             {
-                using (Session session = new Session())
-                {
+                
                     // Set up session options
                     SessionOptions sessionOptions = new SessionOptions
                     {
@@ -458,20 +497,20 @@ public static Image ResizeImage(Image image, Size size)
                     // Your code
                     Console.Write("Attempting upload of {0}...", ftpQueuePath + Path.GetFileName(currentFilename));
                     var transferResult = session.PutFiles(ftpQueuePath + Path.GetFileName(currentFilename), remoteDirectory, false);
-                    session.Close();
+                result = transferResult.IsSuccess;
                     Console.WriteLine("done");
-                    //// Delete source file
-                    Console.Write("Deleting {0} from queue...", currentFilename); // Success
-                    File.Delete(ftpQueuePath + Path.GetFileName(currentFilename));
-                    Console.WriteLine("done");
-                    return transferResult.IsSuccess;
-                }
+                    
+                    
             }
             catch (IOException ex)
             {
                 Console.WriteLine(ex); // Write error
-                return false;
+            } finally
+            {
+                session.Close();
             }
+
+            return result;
         }
 
         public static void ProcessUploadQueue()
@@ -507,7 +546,8 @@ public static Image ResizeImage(Image image, Size size)
                     // Call ftp upload method
                     if (FTPImageUpload(file, ftpQueuePath) == true)
                     {
-                        //addToDatabase();
+                        //Update database
+                        bool databaseUpdated = false;
                         Console.WriteLine("Updating database...");
 
                         MySqlConnection conn = new MySqlConnection(connStr);
@@ -524,7 +564,10 @@ public static Image ResizeImage(Image image, Size size)
                             cmd.Parameters.AddWithValue("@timestamp", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
                             cmd.Parameters.AddWithValue("@uniqueCode", matchingCode);
                             cmd.ExecuteNonQuery();
+                            databaseUpdated = true;
                             Console.WriteLine("File {0} successfully added to database", file);
+                                
+                            
                         }
                         catch (Exception ex)
                         {
@@ -532,6 +575,48 @@ public static Image ResizeImage(Image image, Size size)
                         } finally
                         {
                             conn.Close();
+                        }
+
+                        if (databaseUpdated)
+                        {
+                            //// Delete source file
+                            Console.Write("Deleting {0} from queue...", file); // Success
+                            File.Delete(ftpQueuePath + Path.GetFileName(file));
+                            Console.WriteLine("done");
+                        } else
+                        {
+                            //Delete server file
+                            Session session = new Session();
+                            try
+                            {
+
+                                // Set up session options
+                                SessionOptions sessionOptions = new SessionOptions
+                                {
+                                    Protocol = Protocol.Sftp,
+                                    HostName = ftpAddress,
+                                    UserName = ftpUsername,
+                                    SshHostKeyFingerprint = sshHostKeyFingerprint,
+                                    SshPrivateKeyPath = Directory.GetCurrentDirectory() + @"\booth.ppk",
+                                };
+
+                                // Connect
+                                session.Open(sessionOptions);
+
+                                // Remove file
+                                session.RemoveFiles(remoteDirectory + Path.GetFileName(file));
+
+
+                            }
+                            catch (IOException ex)
+                            {
+                                Console.WriteLine(ex); // Write error
+                            }
+                            finally
+                            {
+                                session.Close();
+                            }
+
                         }
                     }
                 }
