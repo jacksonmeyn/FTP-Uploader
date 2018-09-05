@@ -56,8 +56,8 @@ namespace FTPUploader
             }
             catch (Exception e)
             {
-                Console.WriteLine("Error opening setting file: " + e.ToString(), 0);
-                Console.ReadLine();
+                Console.WriteLine("Error opening setting file. Please check it exists and restart the program.", 0);
+                Exit();
             }
 
             // cycle through each child node in settings file to get values
@@ -69,7 +69,7 @@ namespace FTPUploader
                         localRootFolder = node.InnerText;
 
                         //Add trailing slash if not already included
-                        char trailingSlash = "\\";
+                        char trailingSlash = '\\';
                         if (localRootFolder[localRootFolder.Length - 1] != trailingSlash)
                         {
                             localRootFolder += @"\";
@@ -108,10 +108,11 @@ namespace FTPUploader
 
 
             //Prompt user for event ID an check it exists on server
-            bool validInt = false;
+            
             bool eventExists = false;
             while (!eventExists)
             {
+                bool validInt = false;
                 while (!validInt)
                 {
                     Console.WriteLine("Please enter the ID number of the event you wish to upload this session's photos to");
@@ -145,7 +146,7 @@ namespace FTPUploader
                     testSession.Open(testSessionOptions);
                 } catch (Exception e)
                 {
-                    Console.WriteLine("There was a problem connecting to the server. Please check the internet connection.");
+                    Console.WriteLine("There was a problem connecting to the server. Please check the internet connection and your SSH connection settings.");
                     Exit();
                 }
 
@@ -213,6 +214,8 @@ namespace FTPUploader
                 //Instantiate new list of unique codes and populate
                 codes = null;
                 UpdateUniqueCodes();
+
+                
             }
             
 
@@ -364,7 +367,7 @@ namespace FTPUploader
                         }
                         else
                         {
-                            resizedImageObject = ResizeImage(originalImageObject, new Size(1024, 720));
+                            resizedImageObject = ResizeImage(originalImageObject, new Size(1440, 1080));
                         }
 
                         ImageFormat format;
@@ -390,7 +393,16 @@ namespace FTPUploader
                         resizedImageObject = null;
                         s = null;
 
-                    ProcessUploadQueue();
+                    //If event is not private, we can process the upload immediately
+                        if (!isPrivateEvent)
+                    {
+                        Console.WriteLine("Event is not private, uploading images");
+                        ProcessUploadQueue();
+                    } else
+                    {
+                        Console.WriteLine("Event is private, not uploading images yet");
+                    }
+                        
 
 
                     
@@ -438,6 +450,9 @@ namespace FTPUploader
             {
 
             }
+
+            //Check if any files match the codes
+            ProcessUploadQueue();
 
         }
 
@@ -498,14 +513,14 @@ public static Image ResizeImage(Image image, Size size)
                     Console.Write("Attempting upload of {0}...", ftpQueuePath + Path.GetFileName(currentFilename));
                     var transferResult = session.PutFiles(ftpQueuePath + Path.GetFileName(currentFilename), remoteDirectory, false);
                 result = transferResult.IsSuccess;
-                    Console.WriteLine("done");
+                    Console.WriteLine(result);
                     
                     
             }
-            catch (IOException ex)
+            catch (SessionRemoteException ex)
             {
-                Console.WriteLine(ex); // Write error
-            } finally
+                Console.WriteLine("There seems to be a problem with the internet connection. We'll try this upload again later"); // Write error
+            } catch (Exception e)
             {
                 session.Close();
             }
@@ -528,7 +543,7 @@ public static Image ResizeImage(Image image, Size size)
                     foreach (string[] code in codes)
                     {
 
-                        if (file.Contains(code[0]))
+                        if (code[0] != "" && file.Contains(code[0]))
                         {
                             Console.WriteLine("{0} matched with {1} and code {2}", file, code[0], code[1]);
 
@@ -571,7 +586,7 @@ public static Image ResizeImage(Image image, Size size)
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine(ex.ToString());
+                            Console.WriteLine("Add photo to database failed");
                         } finally
                         {
                             conn.Close();
@@ -585,40 +600,58 @@ public static Image ResizeImage(Image image, Size size)
                             Console.WriteLine("done");
                         } else
                         {
-                            //Delete server file
-                            Session session = new Session();
-                            try
+                            bool deleteSuccess = false;
+                            while (!deleteSuccess)
                             {
-
-                                // Set up session options
-                                SessionOptions sessionOptions = new SessionOptions
+                                //Delete server file
+                                Console.Write("Database error. Removing image from server for now and will try again later...");
+                                Session session = new Session();
+                                try
                                 {
-                                    Protocol = Protocol.Sftp,
-                                    HostName = ftpAddress,
-                                    UserName = ftpUsername,
-                                    SshHostKeyFingerprint = sshHostKeyFingerprint,
-                                    SshPrivateKeyPath = Directory.GetCurrentDirectory() + @"\booth.ppk",
-                                };
+                                    
+                                    // Set up session options
+                                    SessionOptions sessionOptions = new SessionOptions
+                                    {
+                                        Protocol = Protocol.Sftp,
+                                        HostName = ftpAddress,
+                                        UserName = ftpUsername,
+                                        SshHostKeyFingerprint = sshHostKeyFingerprint,
+                                        SshPrivateKeyPath = Directory.GetCurrentDirectory() + @"\booth.ppk",
+                                    };
 
-                                // Connect
-                                session.Open(sessionOptions);
+                                    // Connect
+                                    session.Open(sessionOptions);
 
-                                // Remove file
-                                session.RemoveFiles(remoteDirectory + Path.GetFileName(file));
+                                    // Remove file
+                                    deleteSuccess = session.RemoveFiles(remoteDirectory + Path.GetFileName(file)).IsSuccess;
+                                    if (deleteSuccess)
+                                    {
+                                        Console.WriteLine("done");
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine("failed...retrying delete...");
+                                    }
 
 
+                                }
+                                catch (IOException ex)
+                                {
+                                    Console.WriteLine(ex); // Write error
+                                }
+                                finally
+                                {
+                                    session.Close();
+                                }
                             }
-                            catch (IOException ex)
-                            {
-                                Console.WriteLine(ex); // Write error
-                            }
-                            finally
-                            {
-                                session.Close();
-                            }
+                            
+                            
 
                         }
                     }
+                } else
+                {
+                    Console.WriteLine("Unique code not found for private photo.");
                 }
             }
         }
