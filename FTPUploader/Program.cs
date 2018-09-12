@@ -40,6 +40,8 @@ namespace FTPUploader
             List<String> localSubdirectories = new List<string>();
             List<FileSystemWatcher> fileSystemWatchers = new List<FileSystemWatcher>();
 
+            bool serverPathPresent = false;
+
             string welcomeMessage = "Welcome to the SocialBooth FTP Uploader V1.0 designed for Little Red Photobooth";
             Console.WriteLine(welcomeMessage.ToUpper());
             Console.WriteLine("===========================================================================");
@@ -60,6 +62,9 @@ namespace FTPUploader
                 Exit();
             }
 
+            Console.WriteLine("Please type the name of this event exactly as it is set up in SocialBooth");
+            string eventName = Console.ReadLine();
+
             // cycle through each child node in settings file to get values
             foreach (XmlNode node in XMLSettings.DocumentElement.ChildNodes)
             {
@@ -74,6 +79,8 @@ namespace FTPUploader
                         {
                             localRootFolder += @"\";
                         }
+                        //Add user entered event name
+                        localRootFolder += eventName + @"\";
                         break;
                     case "ftpAddress":
                         ftpAddress = node.InnerText;
@@ -96,6 +103,7 @@ namespace FTPUploader
                         break;
                     case "serverPath":
                         serverPath = node.InnerText;
+                        serverPathPresent = true;
                         break;
                     case "connectionString":
                         connStr = node.InnerText;
@@ -103,6 +111,13 @@ namespace FTPUploader
                 }
 
 
+            }
+
+            //Check server path setting is present or checking for event ID will fail
+            if (!serverPathPresent)
+            {
+                Console.WriteLine("The serverPath setting is missing from appSettings.txt. Please check the file and run the program again");
+                Exit();
             }
 
 
@@ -174,8 +189,7 @@ namespace FTPUploader
             }
 
             //Prompt user for if unique codes will be printed on images
-            Console.WriteLine("Will the photobooth print unique codes on each strip at this event? Enter y or n.");
-            Console.WriteLine("WARNING: If y is selected, photos will not be uploaded unless a unique code is detected, and guests will only be able to see the photos online for which they have a unique code.");
+            Console.WriteLine("Has SocialBooth been set up to print unique codes on each strip? y or n");
             bool validResponse = false;
             while (!validResponse)
             {
@@ -195,15 +209,22 @@ namespace FTPUploader
                 Console.WriteLine("Response was invalid. Please only enter y or n");
             }
 
+            while (!Directory.Exists(localRootFolder))
+            {
+                Console.WriteLine("We couldn't find the directory {0}. This can happen if an event has no photos yet, so we'll keep trying.", localRootFolder);
+                Console.WriteLine("If the event does have photos, please check the event name you typed above is correct, and restart the program");
+                Thread.Sleep(5000);
+            }
+
             //If event is private
             if (isPrivateEvent)
             {
 
-                while (!File.Exists(dataFilePath))
+                if (!File.Exists(dataFilePath))
                 {
-                    Console.WriteLine("We couldn't find the specified data file that contains the unique codes (" + dataFilePath + ").");
-                    Console.WriteLine("Don't worry, this can happen if an event has no photos yet, so we'll keep trying.");
-                    Thread.Sleep(5000);
+                    Console.WriteLine("We couldn't find the specified data file that contains the unique codes (" + dataFilePath + "). Please check appSettings.txt is correct.");
+                    Exit();
+                    
                 }
 
                 Console.WriteLine("Data file for unique codes found.");
@@ -358,16 +379,18 @@ namespace FTPUploader
 
                         //Prepare to resize image
                         Console.WriteLine("Resizing image {0}...", movedOriginal);
+
                         Image resizedImageObject;
 
-                        // If image is original photo, resize to 1024 x 768 pixels, otherwise don't resize
-                        if (fsw.Filter == "*.gif" || (originalImageObject.Width < 900 || originalImageObject.Width > 1100))
+                        // If image is original photo, resize to 1620 x 1080 pixels, otherwise don't resize
+                        if (fsw.Filter == "*.gif" || originalImageObject.Width <= 1620)
                         {
+                            Console.WriteLine("Image too small to resize");
                             resizedImageObject = originalImageObject;
                         }
                         else
                         {
-                            resizedImageObject = ResizeImage(originalImageObject, new Size(1440, 1080));
+                            resizedImageObject = ResizeImage(originalImageObject, new Size(1620, 1080));
                         }
 
                         ImageFormat format;
@@ -651,7 +674,7 @@ public static Image ResizeImage(Image image, Size size)
                     }
                 } else
                 {
-                    Console.WriteLine("Unique code not found for private photo.");
+                    Console.WriteLine("Unique code not found for {0}, so skipping it for now.", file);
                 }
             }
         }
